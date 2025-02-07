@@ -40,6 +40,33 @@ mountssh myserver /var/www --user=www-data
 
 Mounts are created under `~/ssh-mounts/` with automatic directory naming based on the remote user and hostname. The script uses your SSH configuration file (`~/.ssh/config`), so any hosts, identity files, and connection settings defined there will work automatically.
 
+### Dell Battery Management Scripts
+
+Two scripts for managing battery charging behavior on Dell laptops.
+
+#### charge-full
+
+Sets the battery charging mode to Adaptive, which allows the battery to charge to 100%.
+
+```bash
+charge-full
+```
+
+#### charge-limit
+
+Sets a custom charging threshold (85-90%) to optimize battery longevity for laptops that stay plugged in most of the time.
+
+```bash
+charge-limit
+```
+
+**Requirements:**
+- Dell laptop
+- Dell Command Configure (DCC) installed at `/opt/dell/dcc_new`
+- Sudo privileges
+
+These scripts are useful for managing battery longevity on Dell laptops. Use `charge-limit` when your laptop is primarily plugged in to preserve battery life, and `charge-full` when you need maximum battery capacity for mobile use.
+
 ## Installation
 
 1. Clone this repository:
