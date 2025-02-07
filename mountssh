@@ -1,0 +1,119 @@
+#!/bin/bash
+#
+# mountssh - Mount remote directories via SSHFS with optional user switching
+#
+# This script mounts remote directories using SSHFS, with the ability to mount
+# as a different user on the remote system (requires sudo access on remote).
+# It automatically handles home directory resolution and maintains persistent
+# mounts under ~/ssh-mounts.
+#
+# Usage:
+#   mountssh hostname remotepath [--user=username]
+#
+# Examples:
+#   mountssh myserver ~/                     # Mount your home directory
+#   mountssh myserver /var/www --user=www-data  # Mount as www-data user
+#
+# Features:
+#   - Automatic home directory resolution
+#   - Colored output with clickable directory links
+#   - Persistent mounts with automatic reconnection
+#   - User switching via sudo on remote system
+#   - Prevents duplicate mounts
+#
+# Requirements:
+#   - SSHFS installed locally
+#   - SSH access to remote system
+#   - Sudo access on remote system (for --user option)
+#
+
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to create terminal hyperlink
+make_link() {
+    local text="$1"
+    local url="$2"
+    local color="$3"
+    printf "%b\e]8;;%s\e\\%s\e]8;;\e\\%b" "$color" "$url" "$text" "$NC"
+}
+
+# Ensure at least two parameters are passed
+if [[ $# -lt 2 ]]; then
+    echo -e "${RED}Usage: mountssh hostname[required] remotepath[required] --user=foo[optional]${NC}"
+    exit 1
+fi
+
+# Parse parameters
+HOSTNAME="$1"
+REMOTE_PATH="$2"
+TARGET_USER=""
+
+# Check for optional --user flag
+for arg in "$@"; do
+    if [[ $arg == --user=* ]]; then
+        TARGET_USER="${arg#--user=}"
+    fi
+done
+
+# Get remote username first (the user we're connecting as)
+REMOTE_USER=$(ssh "$HOSTNAME" 'whoami' 2>/dev/null)
+if [[ -z "$REMOTE_USER" ]]; then
+    echo -e "${RED}ERROR: Could not connect to $HOSTNAME${NC}"
+    exit 1
+fi
+
+# If path starts with /home/, get the appropriate home directory
+if [[ "$REMOTE_PATH" =~ ^/home/ ]]; then
+    if [[ -n "$TARGET_USER" ]]; then
+        # Get home directory of TARGET_USER using getent
+        REMOTE_PATH=$(ssh "$HOSTNAME" "sudo getent passwd $TARGET_USER | cut -d: -f6" 2>/dev/null)
+    else
+        REMOTE_PATH=$(ssh "$HOSTNAME" 'echo $HOME' 2>/dev/null)
+    fi
+    if [[ -z "$REMOTE_PATH" ]]; then
+        echo -e "${RED}ERROR: Could not determine home directory for ${TARGET_USER:-$REMOTE_USER} on $HOSTNAME${NC}"
+        exit 1
+    fi
+fi
+
+# Construct the mount directory name
+MOUNT_BASE="$HOME/ssh-mounts"
+if [[ -n "$TARGET_USER" ]]; then
+    MOUNT_DIR="$MOUNT_BASE/$TARGET_USER@$HOSTNAME"
+else
+    MOUNT_DIR="$MOUNT_BASE/$REMOTE_USER@$HOSTNAME"
+fi
+
+# Check if the directory is already a mount point
+if mountpoint -q "$MOUNT_DIR"; then
+    echo -e "${YELLOW}NOTE: Directory is already mounted at $(make_link "$MOUNT_DIR" "file://$MOUNT_DIR" "$YELLOW")${NC}"
+    exit 0
+fi
+
+# Create the local mount directory if it doesn't exist
+mkdir -p "$MOUNT_DIR"
+
+echo -e "${BLUE}Using remote path: $REMOTE_PATH${NC}"
+echo -e "${BLUE}Connecting as user: ${TARGET_USER:-$REMOTE_USER}${NC}"
+
+# Build and execute the SSHFS command
+if [[ -n "$TARGET_USER" ]]; then
+    SSHFS_CMD="sshfs $HOSTNAME:$REMOTE_PATH $MOUNT_DIR -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,sftp_server='sudo -u $TARGET_USER /usr/lib/openssh/sftp-server'"
+else
+    SSHFS_CMD="sshfs $HOSTNAME:$REMOTE_PATH $MOUNT_DIR -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3"
+fi
+
+eval "$SSHFS_CMD"
+
+# Check if the mount was successful
+if mountpoint -q "$MOUNT_DIR"; then
+    echo -e "${GREEN}SUCCESS: Mounted $HOSTNAME:$REMOTE_PATH at $(make_link "$MOUNT_DIR" "file://$MOUNT_DIR" "$GREEN")${NC}"
+else
+    echo -e "${RED}ERROR: Failed to mount $HOSTNAME:$REMOTE_PATH${NC}"
+    exit 1
+fi
