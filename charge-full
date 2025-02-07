@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+sudo mv /opt/dell/dcc_new /opt/dell/dcc
+sudo /opt/dell/dcc/cctk --primarybatterycfg=Adaptive
+sudo mv /opt/dell/dcc /opt/dell/dcc_new
+
